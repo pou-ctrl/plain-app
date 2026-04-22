@@ -81,29 +81,23 @@ object TunnelManager {
     }
 
     private suspend fun monitorProcess() {
-        val process = this.process ?: return
+        val proc = this.process ?: return
 
         try {
-            BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
-                var line: String?
-                while (isActive && reader.readLine().also { line = it } != null) {
-                    line?.let { LogCat.d("Cloudflared: $it") }
+            BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
+                var line = reader.readLine()
+                while (line != null) {
+                    LogCat.d("Cloudflared: $line")
+                    line = reader.readLine()
                 }
             }
         } catch (e: IOException) {
             LogCat.e("Error reading tunnel output: ${e.message}")
         }
 
-        val exitCode = process.waitFor()
+        val exitCode = proc.waitFor()
         LogCat.d("Tunnel process exited with code: $exitCode")
 
         isRunning = false
-
-        // Auto-restart if not manually stopped
-        if (exitCode != 0 && job?.isActive == true) {
-            LogCat.d("Tunnel crashed, attempting restart in 5 seconds")
-            delay(5000)
-            // Note: We can't restart here without context, service will handle restart
-        }
     }
 }

@@ -21,6 +21,7 @@ import com.ismartcoding.plain.preferences.HttpPortPreference
 import com.ismartcoding.plain.preferences.HttpsPortPreference
 import com.ismartcoding.plain.ui.models.MainViewModel
 import com.ismartcoding.plain.web.HttpServerManager
+import androidx.compose.foundation.layout.Column
 import kotlinx.coroutines.launch
 
 enum class WebState { OFF, ERROR, ON }
@@ -73,9 +74,9 @@ fun HomeWeb(
         else -> WebState.OFF
     }
 
-    Column {
-        // Web Server Section
-        AnimatedContent(
+    if (webState == WebState.ON) {
+        Column {
+            AnimatedContent(
             targetState = webState,
             transitionSpec = {
                 fadeIn(tween(300)) togetherWith fadeOut(tween(200)) using
@@ -99,13 +100,36 @@ fun HomeWeb(
             )
         }
 
-        // Remote Access Section
-        if (webState == WebState.ON) {
+            // Remote Access Section
             VerticalSpace(dp = 24.dp)
             HomeTunnelSection(
                 context = context,
                 mainVM = mainVM,
                 tunnelEnabled = mainVM.tunnelEnabled
+            )
+        }
+    } else {
+        AnimatedContent(
+            targetState = webState,
+            transitionSpec = {
+                fadeIn(tween(300)) togetherWith fadeOut(tween(200)) using
+                        SizeTransform(clip = false, sizeAnimationSpec = { _, _ -> tween(300) })
+            },
+            label = "web_state",
+        ) { target ->
+            HomeWebMainSection(
+                context = context,
+                navController = navController,
+                mainVM = mainVM,
+                webState = target,
+                isLoading = showLoading,
+                onRun = {
+                    if (!webEnabled && !state.isProcessing()) {
+                        mainVM.enableHttpServer(context, true)
+                    }
+                },
+                errorMessage = errorMessage,
+                onRestartFix = onRestartFix,
             )
         }
     }

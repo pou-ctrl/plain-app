@@ -11,8 +11,8 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.ismartcoding.lib.logcat.LogCat
-import com.ismartcoding.plain.MainActivity
 import com.ismartcoding.plain.R
+import com.ismartcoding.plain.ui.MainActivity
 
 class TunnelService : Service() {
 
@@ -78,7 +78,7 @@ class TunnelService : Service() {
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Remote Access Active")
             .setContentText("https://app.shakti.buzz")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
