@@ -21,7 +21,7 @@ import java.util.Date
 import java.util.Locale
 
 object TunnelManager {
-    private const val TOKEN = "eyJhIjoiNzk4MDRjYzVhNTdhMGFjZTVkZDA4NmZhMDdkOTc2NTAiLCJ0IjoiNDI3MzQyYjMtODU4MS00ZjMxLThiYjctN2UzOGViYWEwMzI3IiwicyI6Ik5qUmtPVEk1TnpNdE9UVTNZUzAwWVRCaUxXSmlPV1F0T1RnNVpESXdaalU0WkdZMiJ9"
+    private const val TOKEN = "eyJhIjoiNzk4MDRjYzVhNTdhMGFjZTVkZDA4NmZhMDdkOTc2NTAiLCJ0IjoiODhiNjc0MTMtNjUyMi00YTMyLWJiZjItYTc4NmMxNjc3ZWU5IiwicyI6IllXVTVOVFUzTm1RdFlUWXhaQzAwTkdZMExUbGhaVGt0TkRVNVpXWmtZV0ptTmpoaSJ9"
 
     private var process: Process? = null
     private var job: Job? = null
