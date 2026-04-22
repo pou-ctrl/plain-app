@@ -83,6 +83,24 @@ object TunnelManager {
 
         addLog("Binary extracted: ${binaryFile.absolutePath}")
 
+        // Ensure binary is executable
+        if (!binaryFile.canExecute()) {
+            addLog("Binary is not executable, attempting to fix permissions...", true)
+            try {
+                val chmodProcess = Runtime.getRuntime().exec(arrayOf("chmod", "755", binaryFile.absolutePath))
+                val exitCode = chmodProcess.waitFor()
+                addLog("chmod exit code: $exitCode")
+                if (exitCode != 0 || !binaryFile.canExecute()) {
+                    addLog("Failed to make binary executable", true)
+                    return false
+                }
+                addLog("Binary permissions fixed")
+            } catch (e: Exception) {
+                addLog("Failed to fix binary permissions: ${e.message}", true)
+                return false
+            }
+        }
+
         return try {
             val maskedToken = "${TOKEN.take(6)}...${TOKEN.takeLast(4)}"
             addLog("Using token: $maskedToken")
