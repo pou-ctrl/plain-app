@@ -9,11 +9,16 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 object TunnelManager {
     private const val TOKEN = "eyJhIjoiNzk4MDRjYzVhNTdhMGFjZTVkZDA4NmZhMDdkOTc2NTAiLCJ0IjoiNDI3MzQyYjMtODU4MS00ZjMxLThiYjctN2UzOGViYWEwMzI3IiwicyI6Ik5qUmtPVEk1TnpNdE9UVTNZUzAwWVRCaUxXSmlPV1F0T1RnNVpESXdaalU0WkdZMiJ9"
@@ -21,23 +26,62 @@ object TunnelManager {
     private var process: Process? = null
     private var job: Job? = null
     private var isRunning = false
+    private val logBuffer = StringBuilder()
+    private val _logs = MutableStateFlow("")
+    val logs: StateFlow<String> = _logs
+
+    private val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
 
     val isTunnelRunning: Boolean
         get() = isRunning && process?.isAlive == true
 
+    private fun addLog(message: String, isError: Boolean = false) {
+        val timestamp = dateFormat.format(Date())
+        val prefix = if (isError) "[ERROR]" else "[INFO]"
+        val logLine = "$timestamp $prefix $message\n"
+
+        synchronized(logBuffer) {
+            logBuffer.append(logLine)
+            // Keep only last 1000 lines to prevent memory issues
+            val lines = logBuffer.toString().split("\n")
+            if (lines.size > 1000) {
+                logBuffer.setLength(0)
+                logBuffer.append(lines.takeLast(1000).joinToString("\n"))
+            }
+        }
+
+        _logs.value = logBuffer.toString()
+        LogCat.d("Tunnel: $message")
+    }
+
+    private fun clearLogs() {
+        synchronized(logBuffer) {
+            logBuffer.setLength(0)
+        }
+        _logs.value = ""
+    }
+
     fun startTunnel(context: Context): Boolean {
         if (isTunnelRunning) {
-            LogCat.d("Tunnel is already running")
+            addLog("Tunnel is already running")
             return true
         }
 
+        clearLogs()
+        addLog("Starting Cloudflare tunnel...")
+
         val binaryFile = AssetExtractor.extractBinary(context)
         if (binaryFile == null) {
-            LogCat.e("Failed to extract cloudflared binary")
+            addLog("Failed to extract cloudflared binary", true)
             return false
         }
 
+        addLog("Binary extracted: ${binaryFile.absolutePath}")
+
         return try {
+            val maskedToken = "${TOKEN.take(6)}...${TOKEN.takeLast(4)}"
+            addLog("Using token: $maskedToken")
+
             val processBuilder = ProcessBuilder(
                 binaryFile.absolutePath,
                 "tunnel",
@@ -45,8 +89,10 @@ object TunnelManager {
                 "--token",
                 TOKEN
             ).apply {
-                redirectErrorStream(true)
+                redirectErrorStream(false) // Keep stdout and stderr separate
             }
+
+            addLog("Executing: cloudflared tunnel run --token [MASKED]")
 
             process = processBuilder.start()
             isRunning = true
@@ -60,16 +106,17 @@ object TunnelManager {
             val intent = Intent(context, TunnelService::class.java)
             ContextCompat.startForegroundService(context, intent)
 
-            LogCat.d("Cloudflare tunnel started")
+            addLog("Tunnel process started successfully")
             true
         } catch (e: IOException) {
-            LogCat.e("Failed to start tunnel process: ${e.message}")
+            addLog("Failed to start tunnel process: ${e.message}", true)
             isRunning = false
             false
         }
     }
 
     fun stopTunnel() {
+        addLog("Stopping tunnel...")
         job?.cancel()
         job = null
 
@@ -77,27 +124,72 @@ object TunnelManager {
         process = null
         isRunning = false
 
-        LogCat.d("Cloudflare tunnel stopped")
+        addLog("Tunnel stopped")
     }
 
     private suspend fun monitorProcess() {
         val proc = this.process ?: return
 
         try {
-            BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
-                var line = reader.readLine()
-                while (line != null) {
-                    LogCat.d("Cloudflared: $line")
-                    line = reader.readLine()
+            // Monitor stdout
+            launch {
+                try {
+                    BufferedReader(InputStreamReader(proc.inputStream)).use { reader ->
+                        var line = reader.readLine()
+                        while (line != null && isActive) {
+                            addLog("STDOUT: $line")
+                            line = reader.readLine()
+                        }
+                    }
+                } catch (e: IOException) {
+                    addLog("Error reading stdout: ${e.message}", true)
                 }
             }
-        } catch (e: IOException) {
-            LogCat.e("Error reading tunnel output: ${e.message}")
+
+            // Monitor stderr
+            launch {
+                try {
+                    BufferedReader(InputStreamReader(proc.errorStream)).use { reader ->
+                        var line = reader.readLine()
+                        while (line != null && isActive) {
+                            val isError = line.lowercase().contains("error") ||
+                                        line.lowercase().contains("failed") ||
+                                        line.lowercase().contains("connection refused") ||
+                                        line.lowercase().contains("invalid") ||
+                                        line.lowercase().contains("timeout")
+                            addLog("STDERR: $line", isError)
+                            line = reader.readLine()
+                        }
+                    }
+                } catch (e: IOException) {
+                    addLog("Error reading stderr: ${e.message}", true)
+                }
+            }
+
+            // Wait for process to complete
+            val exitCode = proc.waitFor()
+            addLog("Process exited with code: $exitCode", exitCode != 0)
+
+            if (exitCode != 0) {
+                addLog("Tunnel connection failed (exit code: $exitCode)", true)
+            }
+
+        } catch (e: Exception) {
+            addLog("Error monitoring process: ${e.message}", true)
+        } finally {
+            isRunning = false
         }
+    }
 
-        val exitCode = proc.waitFor()
-        LogCat.d("Tunnel process exited with code: $exitCode")
-
-        isRunning = false
+    fun getConnectionStatus(): String {
+        return when {
+            !isRunning -> "Disconnected"
+            process?.isAlive == false -> "Process died"
+            logs.value.contains("error", ignoreCase = true) -> "Connection failed"
+            logs.value.contains("connected", ignoreCase = true) -> "Connected"
+            logs.value.contains("starting", ignoreCase = true) -> "Starting tunnel..."
+            logs.value.contains("authenticating", ignoreCase = true) -> "Authenticating..."
+            else -> "Connecting..."
+        }
     }
 }
