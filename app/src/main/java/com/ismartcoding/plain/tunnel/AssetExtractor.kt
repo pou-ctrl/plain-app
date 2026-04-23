@@ -79,8 +79,9 @@ object AssetExtractor {
             }
 
             binaryFile
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             LogCat.e("Failed to extract binary: ${e.message}")
+            addLog("Failed to extract binary: ${e.message}")
             null
         }
     }
@@ -92,7 +93,12 @@ object AssetExtractor {
         // Try File.setExecutable first
         try {
             val result = binaryFile.setExecutable(true, false)
-            addLog("setExecutable result: $result")
+            addLog("setExecutable(false) result: $result")
+            binaryFile.setExecutable(true, true).also {
+                addLog("setExecutable(true) result: $it")
+            }
+            binaryFile.setReadable(true, false)
+            binaryFile.setReadable(true, true)
         } catch (e: Exception) {
             addLog("setExecutable exception: ${e.message}")
         }
@@ -108,21 +114,39 @@ object AssetExtractor {
     }
 
     private fun runChmod(binaryFile: File): Boolean {
-        return try {
-            val process = Runtime.getRuntime().exec(arrayOf("chmod", "700", binaryFile.absolutePath))
-            val exitCode = process.waitFor()
-            addLog("chmod exit code: $exitCode")
+        val chmodCommands = listOf(
+            arrayOf("/system/bin/chmod", "755", binaryFile.absolutePath),
+            arrayOf("chmod", "755", binaryFile.absolutePath),
+            arrayOf("/system/bin/chmod", "700", binaryFile.absolutePath),
+            arrayOf("chmod", "700", binaryFile.absolutePath)
+        )
 
-            // Log output
-            logProcessStreams(process.inputStream, process.errorStream)
+        for (cmd in chmodCommands) {
+            try {
+                addLog("Running chmod command: ${cmd.joinToString(" ")}")
+                val process = Runtime.getRuntime().exec(cmd)
+                val exitCode = process.waitFor()
+                addLog("chmod exit code: $exitCode")
+                logProcessStreams(process.inputStream, process.errorStream)
 
-            val executable = binaryFile.canExecute()
-            addLog("Executable after chmod: $executable")
-            executable
-        } catch (e: Exception) {
-            addLog("chmod failed: ${e.message}")
-            false
+                try {
+                    binaryFile.setExecutable(true, false)
+                    binaryFile.setExecutable(true, true)
+                } catch (e: Exception) {
+                    addLog("Reapply setExecutable exception: ${e.message}")
+                }
+
+                if (binaryFile.canExecute()) {
+                    addLog("Executable after chmod: true")
+                    return true
+                }
+            } catch (e: Exception) {
+                addLog("chmod failed for ${cmd.joinToString(" ")}: ${e.message}")
+            }
         }
+
+        addLog("Executable after all chmod attempts: ${binaryFile.canExecute()}")
+        return binaryFile.canExecute()
     }
 
     private fun verifyBinary(binaryFile: File): Boolean {
